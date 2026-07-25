@@ -1,0 +1,123 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Lint backend
+        working-directory: backend
+        run: |
+          npm ci
+          npm run lint
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+
+  build-and-push:
+    needs: lint
+    runs-on: ubuntu-latest
+    # Only push images from main -- PRs get linted/built but not published
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_USER }}/ai-task-backend:${{ env.IMAGE_TAG }}
+            ${{ env.DOCKERHUB_USER }}/ai-task-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./worker
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_USER }}/ai-task-worker:${{ env.IMAGE_TAG }}
+            ${{ env.DOCKERHUB_USER }}/ai-task-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            VITE_API_BASE_URL=/api
+          tags: |
+            ${{ env.DOCKERHUB_USER }}/ai-task-frontend:${{ env.IMAGE_TAG }}
+            ${{ env.DOCKERHUB_USER }}/ai-task-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  update-infra-repo:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout infrastructure repository
+        uses: actions/checkout@v4
+        with:
+          repository: REPLACE_ORG/ai-task-platform-infra
+          # A fine-grained PAT with contents:write on the infra repo only,
+          # stored as a secret in *this* (application) repo.
+          token: ${{ secrets.INFRA_REPO_PAT }}
+          path: infra-repo
+
+      - name: Update production image tags (GitOps commit)
+        working-directory: infra-repo
+        run: |
+          # yq gives a reliable structured edit of the kustomization.yaml
+          # image tags, rather than a fragile line-based sed replace.
+          curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+          yq -i '(.images[] | select(.name | test("ai-task-backend"))).newTag = "'"${IMAGE_TAG}"'"' overlays/production/kustomization.yaml
+          yq -i '(.images[] | select(.name | test("ai-task-worker"))).newTag = "'"${IMAGE_TAG}"'"' overlays/production/kustomization.yaml
+          yq -i '(.images[] | select(.name | test("ai-task-frontend"))).newTag = "'"${IMAGE_TAG}"'"' overlays/production/kustomization.yaml
+
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add overlays/production/kustomization.yaml
+          git commit -m "ci: bump production images to ${IMAGE_TAG}" || echo "No changes to commit"
+          git push
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+
+      # Argo CD (auto-sync + self-heal, see infra/argocd) picks up this
+      # commit on its next poll/webhook and rolls the new images out --
+      # no further action needed from this pipeline.

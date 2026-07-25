@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ai-task-platform
+
+resources:
+  - ../../k8s
+
+images:
+  # CI/CD updates these tags automatically on every merge to main
+  # (see .github/workflows/ci-cd.yml) -- this is the GitOps sync point
+  # Argo CD watches for changes.
+  - name: REPLACE_DOCKERHUB_USER/ai-task-backend
+    newTag: __BACKEND_TAG__
+  - name: REPLACE_DOCKERHUB_USER/ai-task-worker
+    newTag: __WORKER_TAG__
+  - name: REPLACE_DOCKERHUB_USER/ai-task-frontend
+    newTag: __FRONTEND_TAG__
+
+patches:
+  - target:
+      kind: Ingress
+      name: ai-task-platform-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: ai-task-platform.example.com

@@ -1,0 +1,42 @@
+# node_modules/
+# dist/
+# build/
+# __pycache__/
+# *.pyc
+# .env
+# .env.local
+# !.env.example
+# .DS_Store
+# *.log
+# docs/*.png
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build
+dist/
+build/
+coverage/
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docs (optional)
+docs/*.png

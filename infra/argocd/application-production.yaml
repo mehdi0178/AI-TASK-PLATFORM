@@ -1,0 +1,32 @@
+# Apply this to the cluster where Argo CD is installed:
+#   kubectl apply -f infra/argocd/application-production.yaml
+#
+# This is what gives Auto Sync: Argo CD polls the Infrastructure Repository
+# below every ~3 minutes (and via webhook if configured) and reconciles the
+# live cluster state to match infra/overlays/production automatically.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-task-platform-production
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/REPLACE_ORG/ai-task-platform-infra.git
+    targetRevision: main
+    path: overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-task-platform
+  syncPolicy:
+    automated:
+      prune: true       # remove resources deleted from git
+      selfHeal: true     # revert manual/out-of-band cluster changes
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

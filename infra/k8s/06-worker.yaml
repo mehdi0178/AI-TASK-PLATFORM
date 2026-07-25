@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: ai-task-platform
+  labels:
+    app: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: REPLACE_DOCKERHUB_USER/ai-task-worker:latest
+          envFrom:
+            - configMapRef:
+                name: app-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "400m"
+              memory: "384Mi"
+          # No HTTP surface, so probes shell out to check the process is alive.
+          # (BRPOP blocks up to 5s at a time, so the process staying resident
+          # is a reasonable proxy for "not wedged".)
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "main.py"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            exec:
+              command: ["pgrep", "-f", "main.py"]
+            initialDelaySeconds: 5
+            periodSeconds: 15
+---
+# Baseline CPU-based autoscaling. BRPOP is cheap and mostly idle, so CPU alone
+# under-reacts to queue backlog -- for real "100k tasks/day" bursts we
+# recommend layering KEDA on top, scaling on Redis list length directly.
+# See the commented ScaledObject below (requires KEDA installed in-cluster);
+# leave the HPA in place as a fallback / floor.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker-hpa
+  namespace: ai-task-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+
+---
+# --- Optional (recommended for production): KEDA queue-depth autoscaling ---
+# apiVersion: keda.sh/v1alpha1
+# kind: ScaledObject
+# metadata:
+#   name: worker-scaledobject
+#   namespace: ai-task-platform
+# spec:
+#   scaleTargetRef:
+#     name: worker
+#   minReplicaCount: 2
+#   maxReplicaCount: 50
+#   triggers:
+#     - type: redis
+#       metadata:
+#         address: redis.ai-task-platform.svc.cluster.local:6379
+#         listName: ai_task_queue
+#         listLength: "20" # target ~20 pending tasks per worker replica
