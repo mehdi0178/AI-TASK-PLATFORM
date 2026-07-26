@@ -92,7 +92,7 @@ jobs:
       - name: Checkout infrastructure repository
         uses: actions/checkout@v4
         with:
-          repository: REPLACE_ORG/ai-task-platform-infra
+        repository: mehdi0178/AI-TASK-INFRASTRUCTURE      
           # A fine-grained PAT with contents:write on the infra repo only,
           # stored as a secret in *this* (application) repo.
           token: ${{ secrets.INFRA_REPO_PAT }}
