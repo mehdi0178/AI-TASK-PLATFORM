@@ -9,6 +9,7 @@ indexing, Redis recovery, staging/production deployment strategy).
 
 ## Stack
 
+
 | Component | Technology |
 |---|---|
 | Frontend | React 18 + Vite |
